@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { StyleSheet, View, Text, FlatList } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import AddTodo from './src/components/AddTodo';
 import TodoItem from './src/components/TodoItem';
+import HomeScreen from './src/screens/HomeScreen';
 
 export default function App() {
   const [todos, setTodos] = useState([]);
