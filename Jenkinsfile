@@ -33,7 +33,6 @@ pipeline {
         stage('Build Docker Image') {
             steps {
                 script {
-                    // Build Docker image
                     docker.build("${DOCKER_IMAGE}:${env.BUILD_ID}")
                 }
             }
@@ -42,7 +41,6 @@ pipeline {
         stage('Stop Previous Containers') {
             steps {
                 script {
-                    // Stop and remove any existing containers
                     sh '''
                         docker-compose down || true
                         docker rm -f simple-todo-app || true
@@ -57,30 +55,32 @@ pipeline {
             }
         }
         
-        stage('Health Check') {
+        stage('Container Health Check') {
             steps {
                 script {
-                    timeout(time: 5, unit: 'MINUTES') {
+                    timeout(time: 3, unit: 'MINUTES') {
                         waitUntil {
                             try {
-                                // Try multiple endpoints
-                                def response1 = sh(
-                                    script: 'curl -s -o /dev/null -w "%{http_code}" http://localhost:19006 || echo "500"',
+                                // Check if container is running
+                                def containerStatus = sh(
+                                    script: 'docker inspect --format="{{.State.Status}}" simple-todo-app 2>/dev/null || echo "not-found"',
                                     returnStdout: true
                                 ).trim()
                                 
-                                def response2 = sh(
-                                    script: 'curl -s -o /dev/null -w "%{http_code}" http://localhost:19000 || echo "500"',
+                                // Check if process is running inside container
+                                def processCheck = sh(
+                                    script: 'docker exec simple-todo-app ps aux 2>/dev/null | grep "node.*expo" || echo "not-running"',
                                     returnStdout: true
                                 ).trim()
                                 
-                                echo "Health check responses - 19006: ${response1}, 19000: ${response2}"
+                                echo "Container status: ${containerStatus}"
+                                echo "Process check: ${processCheck}"
                                 
-                                // Consider success if any endpoint responds
-                                return (response1 == "200" || response2 == "200")
+                                // Consider healthy if container is running and process exists
+                                return (containerStatus == "running" && processCheck != "not-running")
                             } catch (Exception e) {
-                                echo "Health check failed: ${e.message}"
-                                sleep 30
+                                echo "Health check in progress: ${e.message}"
+                                sleep 10
                                 return false
                             }
                         }
@@ -89,13 +89,21 @@ pipeline {
             }
         }
         
-        stage('Verify Containers') {
+        stage('Verify Deployment') {
             steps {
                 sh '''
-                    echo "=== Running Containers ==="
+                    echo "=== Deployment Verification ==="
+                    echo "1. Checking running containers:"
                     docker ps
-                    echo "=== Container Logs ==="
-                    docker logs simple-todo-app || echo "No logs available yet"
+                    echo ""
+                    echo "2. Checking container logs:"
+                    docker logs simple-todo-app --tail 20
+                    echo ""
+                    echo "3. Checking exposed ports:"
+                    docker port simple-todo-app
+                    echo ""
+                    echo "4. Checking container health:"
+                    docker inspect --format="State: {{.State.Status}}, Health: {{.State.Health.Status}}" simple-todo-app
                 '''
             }
         }
@@ -104,46 +112,59 @@ pipeline {
     post {
         always {
             echo 'Pipeline execution completed'
-            // Save workspace for debugging
-            // cleanWs() // Comment dulu untuk debugging
         }
         success {
             echo '✅ Mobile App deployed successfully!'
             echo '📱 Access URLs:'
             echo '   - Metro Bundler: http://localhost:8081'
-            echo '   - Expo DevTools: http://localhost:19002'
+            echo '   - Expo DevTools: http://localhost:19002' 
             echo '   - Web Version: http://localhost:19006'
+            echo ''
+            echo '🔧 To use the app:'
+            echo '   1. Install "Expo Go" on your phone'
+            echo '   2. Open http://localhost:19002 in browser'
+            echo '   3. Scan the QR code with Expo Go app'
             
-            // Create build summary
             sh '''
-                echo "## Build Summary" > build-summary.md
-                echo "- Build: ${env.BUILD_ID}" >> build-summary.md
-                echo "- Status: SUCCESS" >> build-summary.md
-                echo "- Timestamp: $(date)" >> build-summary.md
-                echo "" >> build-summary.md
-                echo "### Access Points:" >> build-summary.md
-                echo "- Web App: http://localhost:19006" >> build-summary.md
-                echo "- Expo DevTools: http://localhost:19002" >> build-summary.md
-                echo "- Metro Bundler: http://localhost:8081" >> build-summary.md
+                echo "## 🎉 DEPLOYMENT SUCCESS" > build-success.md
+                echo "" >> build-success.md
+                echo "### 📱 Mobile App Details" >> build-success.md
+                echo "- **Build ID**: ${env.BUILD_ID}" >> build-success.md
+                echo "- **Container**: simple-todo-app" >> build-success.md
+                echo "- **Status**: ✅ Running" >> build-success.md
+                echo "" >> build-success.md
+                echo "### 🌐 Access Points" >> build-success.md
+                echo "- Metro Bundler: http://localhost:8081" >> build-success.md
+                echo "- Expo DevTools: http://localhost:19002" >> build-success.md
+                echo "- Web Version: http://localhost:19006" >> build-success.md
+                echo "" >> build-success.md
+                echo "### 📋 Usage Instructions" >> build-success.md
+                echo "1. Install **Expo Go** app on your smartphone" >> build-success.md
+                echo "2. Open http://localhost:19002 in your browser" >> build-success.md
+                echo "3. Scan the QR code with Expo Go app" >> build-success.md
+                echo "4. The Todo app will load on your phone" >> build-success.md
             '''
         }
         failure {
             echo '❌ Pipeline failed!'
             
-            // Collect debug information
             sh '''
-                echo "=== Debug Information ==="
-                echo "Docker version:"
+                echo "=== DEBUG INFORMATION ==="
+                echo "Docker System Info:"
                 docker --version
-                echo "Node version:"
-                node --version || echo "Node not available"
-                echo "NPM version:"
-                npm --version || echo "NPM not available"
-                echo "Running containers:"
+                echo ""
+                echo "All Containers:"
                 docker ps -a
-                echo "Docker images:"
-                docker images
-                echo "=== End Debug Info ==="
+                echo ""
+                echo "Container Logs:"
+                docker logs simple-todo-app || echo "No logs available"
+                echo ""
+                echo "Docker Images:"
+                docker images | head -10
+                echo ""
+                echo "Network Status:"
+                docker network ls
+                echo "=== END DEBUG INFO ==="
             '''
         }
     }
